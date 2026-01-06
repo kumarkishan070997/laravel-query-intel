@@ -1,0 +1,22 @@
+{
+  "name": "kishan/laravel-query-intel",
+  "description": "Intelligent query analyzer for Laravel",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "Kishan\\QueryIntel\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Kishan\\QueryIntel\\QueryIntelServiceProvider"
+      ]
+    }
+  },
+  "require": {
+  "php": "^8.0",
+  "illuminate/support": "^9.0|^10.0|^11.0|^12.0"
+}
+}
