@@ -4,6 +4,8 @@ namespace Kishan\QueryIntel\Collectors;
 
 use Illuminate\Support\Facades\DB;
 use Kishan\QueryIntel\Storage\QueryStorage;
+use Kishan\QueryIntel\Support\QueryIntelTracker;
+use Illuminate\Support\Facades\Log;
 
 class QueryCollector
 {
@@ -12,37 +14,37 @@ class QueryCollector
     public function register(): void
     {
         DB::listen(function ($query) {
-            // Skip logging for our own internal tables
-            $ignoredTables = [
-                'query_intel_queries',
-                'query_intel_requests',
-            ];
-
-            foreach ($ignoredTables as $table) {
-                if (str_contains(strtolower($query->sql), $table)) {
-                    return; // skip this query
-                }
-            }
-
             if (!app()->bound('query-intel.request-id')) {
                 return;
             }
 
-            $requestId = app('query-intel.request-id');
+            // Skip internal tables to prevent loop
+            $ignoredTables = ['query_intel_queries', 'query_intel_requests'];
+            foreach ($ignoredTables as $table) {
+                if (str_contains(strtolower($query->sql), $table)) {
+                    return;
+                }
+            }
 
+            $requestId = app('query-intel.request-id');
             $normalizedSql = strtolower(trim($query->sql));
             $type = $this->detectType($normalizedSql);
 
-            // Increment counters
-            $queryCount = app()->bound('query-intel.query-count') ? app('query-intel.query-count') : 0;
-            app()->instance('query-intel.query-count', $queryCount + 1);
+            // Increment counters in singleton tracker
+            $tracker = app(QueryIntelTracker::class);
+            $tracker->count++;
+            $tracker->time += $query->time;
+            if ($type === 'select') $tracker->hasRead = true;
+            elseif (in_array($type, ['insert','update','delete','truncate'], true)) $tracker->hasWrite = true;
 
-            $queryTime = app()->bound('query-intel.query-time') ? app('query-intel.query-time') : 0.0;
-            app()->instance('query-intel.query-time', $queryTime + $query->time);
-
-            // Update read/write flags
-            if ($type === 'select') app()->instance('query-intel.has-read', true);
-            elseif (in_array($type, ['insert','update','delete','truncate'], true)) app()->instance('query-intel.has-write', true);
+            Log::info("query executed",[
+                'request_id' => $requestId,
+                'type' => $type,
+                'sql' => $query->sql,
+                'bindings' => $query->bindings,
+                'time' => $query->time,
+                'connection' => $query->connectionName,
+            ]);
 
             // Store query in DB
             $this->storage->store([
@@ -56,7 +58,6 @@ class QueryCollector
                 'location' => $this->getCaller(),
             ]);
         });
-
     }
 
     protected function detectType(string $sql): string

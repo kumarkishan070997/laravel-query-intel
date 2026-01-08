@@ -4,6 +4,7 @@ namespace Kishan\QueryIntel;
 
 use Illuminate\Support\ServiceProvider;
 use Kishan\QueryIntel\Collectors\QueryCollector;
+use Kishan\QueryIntel\Support\QueryIntelTracker;
 use Kishan\QueryIntel\Middleware\QueryIntelMiddleware;
 
 class QueryIntelServiceProvider extends ServiceProvider
@@ -17,6 +18,9 @@ class QueryIntelServiceProvider extends ServiceProvider
             __DIR__ . '/../config/query-intel.php',
             'query-intel'
         );
+
+        $this->app->singleton(QueryIntelTracker::class, fn() => new QueryIntelTracker());
+
     }
 
     /**
