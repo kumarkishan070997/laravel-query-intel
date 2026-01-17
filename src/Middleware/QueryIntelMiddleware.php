@@ -3,36 +3,37 @@
 namespace Kishan\QueryIntel\Middleware;
 
 use Closure;
-use Illuminate\Support\Str;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Kishan\QueryIntel\Models\QueryIntelRequest;
 use Kishan\QueryIntel\Support\QueryIntelTracker;
-use Illuminate\Support\Facades\Log;
 
 class QueryIntelMiddleware
 {
-    protected float $startTime;
-    protected int $startMemory;
-    protected string $requestId;
-
     public function handle(Request $request, Closure $next)
     {
-        $requestId = (string)\Illuminate\Support\Str::uuid();
+        if (! config('query-intel.enabled')) {
+            return $next($request);
+        }
+
+        $requestId = (string) Str::uuid();
         $startMemory = memory_get_usage(true);
 
-        // Store on request (Laravel 11 safe)
+        // Store per-request values safely
         $request->attributes->set('query_intel.request_id', $requestId);
         $request->attributes->set('query_intel.start_memory', $startMemory);
 
-        // Also expose request ID for QueryCollector
         app()->instance('query-intel.request-id', $requestId);
+
+        // Reset tracker (Octane-safe)
+        app(QueryIntelTracker::class)->reset();
 
         QueryIntelRequest::create([
             'request_id' => $requestId,
-            'type' => 'none',
             'method' => $request->method(),
-            'uri' => '/' . ltrim($request->path(), '/'),
+            'uri' => $request->path(),
             'controller' => optional($request->route())->getActionName(),
+            'type' => 'none',
             'total_queries' => 0,
             'total_query_time' => 0,
             'memory_usage' => 0,
@@ -44,23 +45,26 @@ class QueryIntelMiddleware
 
     public function terminate(Request $request, $response): void
     {
+        if (! config('query-intel.enabled')) {
+            return;
+        }
+
         $tracker = app(QueryIntelTracker::class);
 
-        // Retrieve from request attributes
         $requestId = $request->attributes->get('query_intel.request_id');
         $startMemory = $request->attributes->get('query_intel.start_memory');
 
-        if (!$requestId || !$startMemory) {
-            return; // safety guard
+        if (! $requestId) {
+            return;
         }
 
-        $requestType =
-            $tracker->hasRead && $tracker->hasWrite ?'mixed'
-            : ($tracker->hasWrite ?'write'
-                : ($tracker->hasRead ?'read' : 'none'));
+        $type =
+            $tracker->hasRead && $tracker->hasWrite ? 'mixed'
+            : ($tracker->hasWrite ? 'write'
+            : ($tracker->hasRead ? 'read' : 'none'));
 
         QueryIntelRequest::where('request_id', $requestId)->update([
-            'type' => $requestType,
+            'type' => $type,
             'total_queries' => $tracker->count,
             'total_query_time' => round($tracker->time, 2),
             'memory_usage' => memory_get_usage(true) - $startMemory,
